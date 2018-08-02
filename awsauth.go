@@ -19,8 +19,10 @@ type Credentials struct {
 
 // Sign signs a request bound for AWS. It automatically chooses the best
 // authentication scheme based on the service the request is going to.
-func Sign(request *http.Request, credentials ...Credentials) *http.Request {
-	service, _ := serviceAndRegion(request.URL.Host)
+func Sign(request *http.Request, service, region string, credentials ...Credentials) *http.Request {
+	if service == "" {
+		service, _ = serviceAndRegion(request.URL.Host)
+	}
 	signVersion := awsSignVersion[service]
 
 	switch signVersion {
@@ -29,16 +31,15 @@ func Sign(request *http.Request, credentials ...Credentials) *http.Request {
 	case 3:
 		return Sign3(request, credentials...)
 	case 4:
-		return Sign4(request, credentials...)
-	case -1:
-		return SignS3(request, credentials...)
+	default:
+		return Sign4(request, service, region, credentials...)
 	}
 
 	return nil
 }
 
 // Sign4 signs a request with Signed Signature Version 4.
-func Sign4(request *http.Request, credentials ...Credentials) *http.Request {
+func Sign4(request *http.Request, service, region string, credentials ...Credentials) *http.Request {
 	keys := chooseKeys(credentials)
 
 	// Add the X-Amz-Security-Token header when using STS
@@ -48,6 +49,8 @@ func Sign4(request *http.Request, credentials ...Credentials) *http.Request {
 
 	prepareRequestV4(request)
 	meta := new(metadata)
+	meta.service = service
+	meta.region = region
 
 	// Task 1
 	hashedCanonReq := hashedCanonicalRequestV4(request, meta)
@@ -57,6 +60,7 @@ func Sign4(request *http.Request, credentials ...Credentials) *http.Request {
 
 	// Task 3
 	signingKey := signingKeyV4(keys.SecretAccessKey, meta.date, meta.region, meta.service)
+
 	signature := signatureV4(signingKey, stringToSign)
 
 	request.Header.Set("Authorization", buildAuthHeaderV4(signature, meta, keys))
